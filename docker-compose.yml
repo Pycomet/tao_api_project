@@ -1,0 +1,65 @@
+
+services:
+  fastapi:
+    build: .
+    container_name: fastapi_app
+    restart: always
+    env_file:
+      - .env
+    depends_on:
+      - redis
+      - db
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app
+
+  celery_worker:
+    build: .
+    container_name: celery_worker
+    command: celery -A tasks.worker worker --loglevel=info
+    env_file:
+      - .env
+    depends_on:
+      - redis
+      - db
+    volumes:
+      - .:/app
+
+  redis:
+    image: redis:7
+    container_name: redis
+    ports:
+      - "6379:6379"
+
+  db:
+    image: postgres:15
+    container_name: postgres
+    restart: always
+    environment:
+      POSTGRES_USER: tao_user
+      POSTGRES_PASSWORD: tao_pass
+      POSTGRES_DB: tao_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tao_user"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  flower:
+    image: mher/flower
+    container_name: flower
+    command: flower --broker=redis://redis:6379/0
+    ports:
+      - "5555:5555"
+    environment:
+    - C_FORCE_ROOT=true
+    depends_on:
+      - redis
+
+volumes:
+  postgres_data:

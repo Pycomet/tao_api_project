@@ -1,0 +1,9 @@
+fastapi
+uvicorn[standard]
+redis[asyncio]
+celery[redis]
+httpx
+bittensor
+sqlalchemy
+asyncpg
+python-dotenv
