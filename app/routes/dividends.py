@@ -91,6 +91,7 @@ async def get_dividend(
                     "hotkey": hotkey,
                     "dividend": json.loads(cached_value),
                     "cached": True
+                    "stake_tx_triggered": False
                 }
             
             logger.info(f"Cache miss for {netuid}/{hotkey}, fetching from chain")
@@ -124,13 +125,13 @@ async def get_dividend(
                         
                 results = {
                     "data": data,
-                    "cached": True
+                    "cached": True,
+                    "stake_tx_triggered": False
                 }
             else:
                 logger.info(f"Cache miss for netuid - {netuid}")
                 netuid = 18
-                            
-                
+                                        
                 
         # Condition 3: Hotkey is provided but Netuid is not
         elif netuid is None and hotkey is not None:
@@ -156,7 +157,8 @@ async def get_dividend(
                         
                 results = {
                     "data": data,
-                    "cached": True
+                    "cached": True,
+                    "stake_tx_triggered": False
                 }
             else:
                 logger.info(f"Cache miss for hotkey - {hotkey}")
@@ -191,7 +193,8 @@ async def get_dividend(
                             "netuid": netuid,
                             "hotkey": hotkey,
                             "dividend": result.value,
-                            "cached": False
+                            "cached": False,
+                            "stake_tx_triggered": False
                         }
                     
                     logger.warning(f"No dividend found for {netuid}/{hotkey}")
