@@ -1,5 +1,5 @@
 from celery import Celery
-from app.redis_config import (
+from app.config import (
     REDIS_HOST, REDIS_PORT, REDIS_DB, CACHE_TTL,
     get_dividend_cache_key, get_block_hash_cache_key,
     get_update_status_key, get_update_start_time_key, get_update_progress_key

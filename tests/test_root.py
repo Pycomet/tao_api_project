@@ -4,6 +4,7 @@ from app.main import app
 client = TestClient(app)
 
 def test_root():
-    response = client.get("/")
+    response = client.get("/api/v1")
     assert response.status_code == 200
-    assert response.json() == {"message": "Welcome to the TAO API Service"} 
+    assert response.json() == {"message": "Welcome to the TAO API Service"}
+

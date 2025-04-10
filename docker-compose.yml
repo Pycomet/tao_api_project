@@ -19,7 +19,7 @@ services:
       - REDIS_PORT=6379
       - REDIS_DB=0
 
-  celery_worker:
+  worker:
     build: .
     container_name: tao_celery_worker
     command: celery -A tasks.worker worker --loglevel=info
@@ -28,6 +28,23 @@ services:
     depends_on:
       - redis
       - db
+    volumes:
+      - .:/app
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_DB=0
+
+  scheduler:
+    build: .
+    container_name: tao_celery_scheduler
+    command: celery -A tasks.scheduler beat --loglevel=info
+    env_file:
+      - .env
+    depends_on:
+      - redis
+      - db
+      - worker
     volumes:
       - .:/app
     environment:

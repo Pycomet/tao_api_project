@@ -1,0 +1,16 @@
+{
+    "codefred": {
+        "username": "codefred",
+        "full_name": "Alfred The Dev",
+        "email": "alfred@example.com",
+        "hashed_password": get_password_hash("secret123"),  # 👈 test password
+        "disabled": False,
+    },
+    "devqueen": {
+        "username": "devqueen",
+        "full_name": "Queen Coder",
+        "email": "queen@example.com",
+        "hashed_password": get_password_hash("codequeen"),
+        "disabled": False,
+    }
+}
