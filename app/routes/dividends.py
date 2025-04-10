@@ -90,7 +90,7 @@ async def get_dividend(
                     "netuid": netuid,
                     "hotkey": hotkey,
                     "dividend": json.loads(cached_value),
-                    "cached": True
+                    "cached": True,
                     "stake_tx_triggered": False
                 }
             
