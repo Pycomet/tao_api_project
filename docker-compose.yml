@@ -1,8 +1,9 @@
+version: '3.8'
 
 services:
-  fastapi:
+  api:
     build: .
-    container_name: fastapi_app
+    container_name: tao_api
     restart: always
     env_file:
       - .env
@@ -13,10 +14,14 @@ services:
       - "8000:8000"
     volumes:
       - .:/app
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_DB=0
 
   celery_worker:
     build: .
-    container_name: celery_worker
+    container_name: tao_celery_worker
     command: celery -A tasks.worker worker --loglevel=info
     env_file:
       - .env
@@ -25,12 +30,18 @@ services:
       - db
     volumes:
       - .:/app
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_DB=0
 
   redis:
     image: redis:7
-    container_name: redis
+    container_name: tao_redis
     ports:
       - "6379:6379"
+    volumes:
+      - redis_data:/data
 
   db:
     image: postgres:15
@@ -50,16 +61,6 @@ services:
       timeout: 5s
       retries: 5
 
-  flower:
-    image: mher/flower
-    container_name: flower
-    command: flower --broker=redis://redis:6379/0
-    ports:
-      - "5555:5555"
-    environment:
-    - C_FORCE_ROOT=true
-    depends_on:
-      - redis
-
 volumes:
   postgres_data:
+  redis_data:
