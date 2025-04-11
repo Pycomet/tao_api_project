@@ -1,7 +1,8 @@
 from celery import Celery
+from app.clients import DaturaClient, LLMClient
 from app.config import (
     REDIS_HOST, REDIS_PORT, REDIS_DB, CACHE_TTL,
-    get_dividend_cache_key, get_block_hash_cache_key,
+    get_dividend_cache_key, get_block_hash_cache_key, get_sentiment_cache_key,
     get_update_status_key, get_update_start_time_key, get_update_progress_key
 )
 import redis
@@ -143,6 +144,101 @@ def update_dividends_cache(self):
             logger.error("Max retries exceeded for periodic update_dividends_cache task")
             raise
 
+# Initialize clients
+datura_client = DaturaClient()
+llm_client = LLMClient()
+
+@celery_app.task(bind=True, max_retries=3)
+async def analyze_sentiment(self, netuid: int) -> dict[str, any]:
+    """
+    Analyze sentiment for a given netuid by searching for tweets and calculating a sentiment score.
+    Results are cached in Redis for CACHE_TTL seconds.
+    
+    Args:
+        netuid (int): The netuid to analyze sentiment for
+        
+    Returns:
+        dict[str, any]: A dictionary containing:
+            - success (bool): Whether the analysis was successful
+            - sentiment_score (str): The calculated sentiment score (-100 to 100)
+            - tweets_analyzed (int): Number of tweets analyzed
+            - error (str): Error message if any
+            - cached (bool): Whether the result was retrieved from cache
+    """
+    try:
+        # Search for tweets
+        tweets_result = await datura_client.search_tweets(str(netuid))
+        if not tweets_result:
+            return {
+                "success": False,
+                "error": "No tweets found",
+                "sentiment_score": "",
+                "tweets_analyzed": 0
+            }
+        
+        # Extract tweet texts
+        tweets = [result.get("text") for result in tweets_result if "text" in result.keys()]
+        if not tweets:
+            return {
+                "success": False,
+                "error": "No valid tweets found",
+                "sentiment_score": "",
+                "tweets_analyzed": 0
+            }
+        
+        # Combine tweets for analysis
+        combined_tweets = "\n".join(tweets) 
+        
+        # Create sentiment prompt
+        SENTIMENT_PROMPT = f"""Analyze the sentiment expressed in the following tweets and provide a single sentiment score ranging from -100 (very negative) to +100 (very positive), representing the overall sentiment of the provided tweets. Consider the nuances in language, opinions, and emotions expressed in the text.
+        
+        **Tweets:**
+        {combined_tweets}
+        
+        Just return the overall sentiment score without any explanatory text
+        """
+        
+        # Get sentiment analysis
+        sentiment_result = await llm_client.query_chute_llm(SENTIMENT_PROMPT)
+
+        cache_key = get_sentiment_cache_key(netuid)
+        
+        try:
+            result = {
+                "success": True,
+                "sentiment_score": sentiment_result,
+                "tweets_analyzed": len(tweets),
+                "error": None,
+                "cached": False
+            }
+            # Cache the successful result
+            redis_client.set(cache_key, json.dumps(result), ex=CACHE_TTL)
+            return result
+        except (ValueError, TypeError):
+            result = {
+                "success": False,
+                "error": "Invalid sentiment score format",
+                "sentiment_score": "",
+                "tweets_analyzed": len(tweets)
+            }
+            # Cache the error result
+            redis_client.set(cache_key, json.dumps(result), ex=CACHE_TTL)
+            return result
+        
+    except Exception as e:
+        logger.error(f"Error in analyze_sentiment: {str(e)}")
+        try:
+            self.retry(exc=e, countdown=60)  # Retry after 1 minute
+        except MaxRetriesExceededError:
+            result = {
+                "success": False,
+                "error": str(e),
+                "sentiment_score": "",
+                "tweets_analyzed": 0
+            }
+            # Cache the error result
+            redis_client.set(cache_key, json.dumps(result), ex=CACHE_TTL)
+            return result
 
 if __name__ == '__main__':
     celery_app.start()

@@ -1,6 +1,5 @@
 from fastapi import FastAPI, HTTPException, APIRouter, Query
 from fastapi.middleware.cors import CORSMiddleware
-import asyncio
 import time
 import logging
 from async_substrate_interface.async_substrate import AsyncSubstrateInterface
@@ -17,11 +16,14 @@ from datetime import datetime, timedelta
 from typing import Optional
 from jose import jwt, JWTError # type: ignore
 from fastapi import HTTPException, Security
+import aiohttp
+import asyncio
 
 from passlib.context import CryptContext # type: ignore
 import os
 from dotenv import load_dotenv
 from datetime import datetime
+from datura_py import Datura # type: ignore
 
 load_dotenv()
 
@@ -29,6 +31,9 @@ load_dotenv()
 REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
 REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))
 REDIS_DB = int(os.getenv("REDIS_DB", 0))
+
+DATURA_API_KEY = os.getenv("DATURA_API_KEY")
+CHUTES_API_KEY = os.getenv("CHUTES_API_KEY")
 
 # Cache settings
 CACHE_TTL = 240  # 2 minutes in seconds
@@ -49,6 +54,9 @@ def get_update_start_time_key() -> str:
 def get_update_progress_key() -> str:
     return "tao_dividend:update_progress" 
 
+def get_sentiment_cache_key(netuid: int) -> str:
+    return f"divident_sentiment:{netuid}"
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -68,3 +76,4 @@ except redis.ConnectionError as e:
 
 router = APIRouter()
 app = FastAPI()
+
