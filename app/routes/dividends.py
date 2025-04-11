@@ -1,5 +1,7 @@
 from app.config import *
 from app.utils import fetch_tao_dividends
+import os
+from tasks.worker import analyze_sentiment
 
 @router.get("/tao-dividends/all")
 async def tao_dividends(current_user: dict = Depends(get_current_user)):
@@ -65,6 +67,7 @@ async def tao_dividends(current_user: dict = Depends(get_current_user)):
         raise HTTPException(status_code=500, detail=str(e))
     
 
+
 @router.get("/tao-dividends")
 async def get_dividend(
     netuid: int = Query(None, description="The netuid of the subnet"),
@@ -73,11 +76,10 @@ async def get_dividend(
     current_user: dict = Depends(get_current_user)
 ):
     """
-    Get dividend for specific netuid and hotkey.
+    Get dividend for specific netuid and hotkey with optional trading based on sentiment.
     """
     results = {}
 
-    
     try:
         # Condtion 1: Both Netuid & Hotkey are provided
         if netuid is not None and hotkey is not None:
@@ -86,7 +88,7 @@ async def get_dividend(
             
             if cached_value:
                 logger.info(f"Cache hit for {netuid}/{hotkey}")
-                results =  {
+                results = {
                     "netuid": netuid,
                     "hotkey": hotkey,
                     "dividend": json.loads(cached_value),
@@ -170,9 +172,19 @@ async def get_dividend(
             netuid = 18
             hotkey = "5FFApaS75bv5pJHfAp2FVLBj9ZaXuFDjEypsaBNc1wCfe52v"
 
+        analyze_sentiment.delay(netuid=netuid)
+
         if len(results.keys()) == 0:
             # If not in cache, fetch from chain
             cache_key = get_dividend_cache_key(netuid, hotkey)
+            
+            sentiment_cache_key = get_sentiment_cache_key(netuid)
+            sentiment_result = redis_client.get(sentiment_cache_key)
+            if sentiment_result:
+                sentiment_result = json.loads(sentiment_result)
+                sentiment_score = sentiment_result.get("sentiment_score")
+            else:
+                sentiment_score = "0"
             
             try:
                 async with AsyncSubstrateInterface("wss://entrypoint-finney.opentensor.ai:443",
@@ -194,7 +206,8 @@ async def get_dividend(
                             "hotkey": hotkey,
                             "dividend": result.value,
                             "cached": False,
-                            "stake_tx_triggered": False
+                            "stake_tx_triggered": False,
+                            "sentiment_score": sentiment_score
                         }
                     
                     logger.warning(f"No dividend found for {netuid}/{hotkey}")
@@ -202,7 +215,26 @@ async def get_dividend(
             except Exception as e:
                 logger.error(f"Error querying substrate for {netuid}/{hotkey}: {e}")
                 raise HTTPException(status_code=500, detail=f"Failed to query substrate: {str(e)}")
+
+        # If trading is requested, process it asynchronously
+        if trade:
+            try:
+                # trading_task = process_trading_request.delay(netuid, hotkey)
+                # trading_result = trading_task.get()
+                trading_result = {}
                 
+                # Add trading info to response
+                results.update({
+                    "sentiment_score": trading_result.get("sentiment_score"),
+                    "trading_action": trading_result.get("trading_action"),
+                    "trading_success": trading_result.get("success"),
+                    "stake_tx_triggered": True
+                })
+            except Exception as e:
+                logger.error(f"Error processing trading request: {e}")
+                results["trading_error"] = str(e)
+                results["stake_tx_triggered"] = False
+
         return results
                 
         
