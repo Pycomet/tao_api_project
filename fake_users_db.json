@@ -3,14 +3,14 @@
         "username": "codefred",
         "full_name": "Alfred The Dev",
         "email": "alfred@example.com",
-        "hashed_password": get_password_hash("secret123"),  # 👈 test password
-        "disabled": False,
+        "hashed_password": "$2b$12$.dPEjpIGkiLzpraNUCz6uOWlLQNg2WaIY8wZeIik3PmxynzlhPyby",
+        "disabled": false
     },
     "devqueen": {
         "username": "devqueen",
         "full_name": "Queen Coder",
         "email": "queen@example.com",
-        "hashed_password": get_password_hash("codequeen"),
-        "disabled": False,
+        "hashed_password": "$2b$12$.dPEjpIGkiLzpraNUCz6uOWlLQNg2WaIY8wZeIik3PmxynzlhPyby",
+        "disabled": false
     }
 }
