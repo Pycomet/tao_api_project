@@ -1,7 +1,7 @@
 from app.config import *
 from app.utils import fetch_tao_dividends
 import os
-from tasks.worker import analyze_sentiment
+from tasks.worker import analyze_sentiment, execute_sentiment_trade
 
 @router.get("/tao-dividends/all")
 async def tao_dividends(current_user: dict = Depends(get_current_user)):
@@ -219,20 +219,19 @@ async def get_dividend(
         # If trading is requested, process it asynchronously
         if trade:
             try:
-                # trading_task = process_trading_request.delay(netuid, hotkey)
-                # trading_result = trading_task.get()
-                trading_result = {}
+                trading_result = execute_sentiment_trade.delay(netuid, hotkey)
                 
                 # Add trading info to response
                 results.update({
-                    "sentiment_score": trading_result.get("sentiment_score"),
-                    "trading_action": trading_result.get("trading_action"),
-                    "trading_success": trading_result.get("success"),
+                    "stake_amount": trading_result.get("amount", 0),
+                    "stake_action": trading_result.get("action", "processing"),
+                    "stake_success": trading_result.get("success", ""),
+                    "stake_error": trading_result.get("error", ""),
                     "stake_tx_triggered": True
                 })
             except Exception as e:
                 logger.error(f"Error processing trading request: {e}")
-                results["trading_error"] = str(e)
+                results["stake_error"] = str(e)
                 results["stake_tx_triggered"] = False
 
         return results

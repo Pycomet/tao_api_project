@@ -54,7 +54,7 @@ def custom_openapi():
 app.openapi = custom_openapi
 
 # Custom Swagger UI
-@app.get("/api/v1/docs", include_in_schema=False)
+@router.get("/docs", include_in_schema=False)
 async def custom_swagger_ui_html():
     return get_swagger_ui_html(
         openapi_url="/api/v1/openapi.json",
@@ -72,4 +72,5 @@ async def root():
 async def health_check():
     return {"status": "healthy"}
 
+# Include routers
 app.include_router(router, prefix="/api/v1")

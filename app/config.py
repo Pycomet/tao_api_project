@@ -35,6 +35,10 @@ REDIS_DB = int(os.getenv("REDIS_DB", 0))
 DATURA_API_KEY = os.getenv("DATURA_API_KEY")
 CHUTES_API_KEY = os.getenv("CHUTES_API_KEY")
 
+BITTENSOR_WALLET_NAME = os.getenv("BITTENSOR_WALLET_NAME", "default")
+BITTENSOR_WALLET_HOTKEY = os.getenv("BITTENSOR_WALLET_HOTKEY", "default")
+BITTENSOR_MNEMONIC = os.getenv("BITTENSOR_MNEMONIC", None)
+
 # Cache settings
 CACHE_TTL = 240  # 2 minutes in seconds
 

@@ -1,5 +1,6 @@
+from typing import Any, Dict
 from celery import Celery
-from app.clients import DaturaClient, LLMClient
+from app.clients import BittensorWallet, DaturaClient, LLMClient
 from app.config import (
     REDIS_HOST, REDIS_PORT, REDIS_DB, CACHE_TTL,
     get_dividend_cache_key, get_block_hash_cache_key, get_sentiment_cache_key,
@@ -19,6 +20,11 @@ from datetime import datetime
 
 # Configure logging
 logger = get_task_logger(__name__)
+
+# Initialize clients
+datura_client = DaturaClient()
+llm_client = LLMClient()
+wallet = BittensorWallet()
 
 # Initialize Celery
 celery_app = Celery('tasks.worker', broker=f'redis://{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}')
@@ -144,9 +150,7 @@ def update_dividends_cache(self):
             logger.error("Max retries exceeded for periodic update_dividends_cache task")
             raise
 
-# Initialize clients
-datura_client = DaturaClient()
-llm_client = LLMClient()
+
 
 @celery_app.task(bind=True, max_retries=3)
 async def analyze_sentiment(self, netuid: int) -> dict[str, any]:
@@ -203,9 +207,21 @@ async def analyze_sentiment(self, netuid: int) -> dict[str, any]:
 
         cache_key = get_sentiment_cache_key(netuid)
         
+        run_sentiment = False
+        
+        if float(sentiment_result):
+            execute_sentiment_trade(
+                netuid=netuid,
+                hotkey=wallet.hotkey,
+                sentiment_score=float(sentiment_result),
+            )
+            run_sentiment = True
+        else:
+            logging.error(f"Unable to execute sentiment staking action - {sentiment_result}")
+        
         try:
             result = {
-                "success": True,
+                "success": run_sentiment,
                 "sentiment_score": sentiment_result,
                 "tweets_analyzed": len(tweets),
                 "error": None,
@@ -239,6 +255,67 @@ async def analyze_sentiment(self, netuid: int) -> dict[str, any]:
             # Cache the error result
             redis_client.set(cache_key, json.dumps(result), ex=CACHE_TTL)
             return result
+
+
+@celery_app.task(bind=True, max_retries=3)
+async def execute_sentiment_trade(netuid: int, hotkey: str, sentiment_score: float) -> Dict[str, Any]:
+    """
+    Execute a trade based on the sentiment score.
+    Stakes or unstakes TAO proportional to the sentiment score (-100 to +100).
+    
+    Args:
+        netuid (int): The netuid to trade for
+        hotkey (str): The hotkey to trade with
+        sentiment_score (float): The sentiment score to base the trade on (-100 to +100)
+        
+    Returns:
+        Dict[str, Any]: A dictionary containing:
+            - success (bool): Whether the trade was successful
+            - action (str): The action taken (stake/unstake)
+            - amount (float): The amount traded
+            - error (str): Error message if any
+    """
+    try:
+        # Base amount to stake/unstake (1 TAO)
+        BASE_AMOUNT = 0.01
+        # Calculate final amount
+        assert sentiment_score is not None, "Sentiment score is None!"
+        amount = BASE_AMOUNT * abs(sentiment_score)
+        assert amount is not None, "Amount calculation failed!"
+        
+        if sentiment_score > 0:
+            # Stake TAO
+            result = await wallet.add_stake(netuid=netuid, hotkey=hotkey, amount=float(amount))
+            action = "stake"
+        elif sentiment_score < 0:
+            # Unstake TAO
+            result = await wallet.unstake(netuid=netuid, hotkey=hotkey, amount=float(amount))
+            action = "unstake"
+        else:
+            return {
+                "success": True,
+                "action": "no_action",
+                "amount": 0.0,
+                "error": None
+            }
+            
+        
+        return {
+            "success": result.get("success", False),
+            "action": action,
+            "amount": amount,
+            "error": result.get("error", "")
+        }
+        
+    except Exception as e:
+        logger.error(f"Error in execute_sentiment_trade: {str(e)}")
+        return {
+            "success": False,
+            "action": "error",
+            "amount": 0.0,
+            "error": str(e)
+        }
+
 
 if __name__ == '__main__':
     celery_app.start()

@@ -7,6 +7,15 @@ from typing import Optional
 from jose import jwt, JWTError # type: ignore
 from datetime import datetime, timedelta, timezone
 
+import subprocess
+import json
+
+
+# Usage
+# balance_info = get_tao_balance()
+# print(balance_info)
+
+
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
 # Use a secure secret in production!
