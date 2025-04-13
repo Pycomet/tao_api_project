@@ -170,9 +170,12 @@ async def analyze_sentiment(self, netuid: int) -> dict[str, any]:
             - cached (bool): Whether the result was retrieved from cache
     """
     try:
+        logger.info(f"Starting sentiment analysis for netuid {netuid}")
+        
         # Search for tweets
         tweets_result = await datura_client.search_tweets(str(netuid))
         if not tweets_result:
+            logger.warning(f"No tweets found for netuid {netuid}")
             return {
                 "success": False,
                 "error": "No tweets found",
@@ -183,12 +186,15 @@ async def analyze_sentiment(self, netuid: int) -> dict[str, any]:
         # Extract tweet texts
         tweets = [result.get("text") for result in tweets_result if "text" in result.keys()]
         if not tweets:
+            logger.warning(f"No valid tweets found for netuid {netuid}")
             return {
                 "success": False,
                 "error": "No valid tweets found",
                 "sentiment_score": "",
                 "tweets_analyzed": 0
             }
+        
+        logger.info(f"Found {len(tweets)} tweets for analysis")
         
         # Combine tweets for analysis
         combined_tweets = "\n".join(tweets) 
@@ -204,47 +210,37 @@ async def analyze_sentiment(self, netuid: int) -> dict[str, any]:
         
         # Get sentiment analysis
         sentiment_result = await llm_client.query_chute_llm(SENTIMENT_PROMPT)
-
-        cache_key = get_sentiment_cache_key(netuid)
+        sentiment_score = float(sentiment_result)
         
-        run_sentiment = False
+        logger.info(f"Sentiment analysis complete - Score: {sentiment_score:.2f}")
         
-        if float(sentiment_result):
-            execute_sentiment_trade(
+        if sentiment_score:
+            logger.info(f"Executing trade based on sentiment score: {sentiment_score:.2f}")
+            await execute_sentiment_trade(
                 netuid=netuid,
                 hotkey=wallet.hotkey,
-                sentiment_score=float(sentiment_result),
+                sentiment_score=sentiment_score,
             )
-            run_sentiment = True
-        else:
-            logging.error(f"Unable to execute sentiment staking action - {sentiment_result}")
         
-        try:
-            result = {
-                "success": run_sentiment,
-                "sentiment_score": sentiment_result,
-                "tweets_analyzed": len(tweets),
-                "error": None,
-                "cached": False
-            }
-            # Cache the successful result
-            redis_client.set(cache_key, json.dumps(result), ex=CACHE_TTL)
-            return result
-        except (ValueError, TypeError):
-            result = {
-                "success": False,
-                "error": "Invalid sentiment score format",
-                "sentiment_score": "",
-                "tweets_analyzed": len(tweets)
-            }
-            # Cache the error result
-            redis_client.set(cache_key, json.dumps(result), ex=CACHE_TTL)
-            return result
+        result = {
+            "success": True,
+            "sentiment_score": sentiment_result,
+            "tweets_analyzed": len(tweets),
+            "error": None,
+            "cached": False
+        }
+        
+        # Cache the result
+        cache_key = get_sentiment_cache_key(netuid)
+        redis_client.set(cache_key, json.dumps(result), ex=CACHE_TTL)
+        logger.info(f"Cached sentiment result for netuid {netuid}")
+        
+        return result
         
     except Exception as e:
-        logger.error(f"Error in analyze_sentiment: {str(e)}")
+        logger.error(f"Sentiment analysis failed for netuid {netuid} - Error: {str(e)}")
         try:
-            self.retry(exc=e, countdown=60)  # Retry after 1 minute
+            self.retry(exc=e, countdown=60)
         except MaxRetriesExceededError:
             result = {
                 "success": False,
@@ -252,7 +248,7 @@ async def analyze_sentiment(self, netuid: int) -> dict[str, any]:
                 "sentiment_score": "",
                 "tweets_analyzed": 0
             }
-            # Cache the error result
+            cache_key = get_sentiment_cache_key(netuid)
             redis_client.set(cache_key, json.dumps(result), ex=CACHE_TTL)
             return result
 
@@ -283,15 +279,20 @@ async def execute_sentiment_trade(netuid: int, hotkey: str, sentiment_score: flo
         amount = BASE_AMOUNT * abs(sentiment_score)
         assert amount is not None, "Amount calculation failed!"
         
+        logger.info(f"Preparing trade - Netuid: {netuid}, Hotkey: {hotkey}, Sentiment: {sentiment_score:.2f}, Amount: {amount:.4f} TAO")
+        
         if sentiment_score > 0:
             # Stake TAO
+            logger.info(f"Staking {amount:.4f} TAO to netuid {netuid} for hotkey {hotkey}")
             result = await wallet.add_stake(netuid=netuid, hotkey=hotkey, amount=float(amount))
             action = "stake"
         elif sentiment_score < 0:
             # Unstake TAO
+            logger.info(f"Unstaking {amount:.4f} TAO from netuid {netuid} for hotkey {hotkey}")
             result = await wallet.unstake(netuid=netuid, hotkey=hotkey, amount=float(amount))
             action = "unstake"
         else:
+            logger.info("No action needed - sentiment score is neutral")
             return {
                 "success": True,
                 "action": "no_action",
@@ -299,6 +300,10 @@ async def execute_sentiment_trade(netuid: int, hotkey: str, sentiment_score: flo
                 "error": None
             }
             
+        if result.get("success", False):
+            logger.info(f"Trade successful - Action: {action}, Amount: {amount:.4f} TAO")
+        else:
+            logger.error(f"Trade failed - Action: {action}, Error: {result.get('error', 'Unknown error')}")
         
         return {
             "success": result.get("success", False),
@@ -308,7 +313,7 @@ async def execute_sentiment_trade(netuid: int, hotkey: str, sentiment_score: flo
         }
         
     except Exception as e:
-        logger.error(f"Error in execute_sentiment_trade: {str(e)}")
+        logger.error(f"Trade execution failed - Netuid: {netuid}, Hotkey: {hotkey}, Error: {str(e)}")
         return {
             "success": False,
             "action": "error",

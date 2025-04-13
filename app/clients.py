@@ -102,7 +102,6 @@ class BittensorWallet:
         self.faucet_hotkey = "default"
         self.max_faucet_transfer = 40.0
 
-        
         # Create wallet directory if it doesn't exist
         Path(self.wallet_path).mkdir(parents=True, exist_ok=True)
         
@@ -137,18 +136,18 @@ class BittensorWallet:
             try:
                 _ = w.coldkeypub.ss58_address
                 _ = w.hotkey.ss58_address
-                logger.info(f"Using existing wallet: {self.wallet_name}")
+                logger.info(f"Wallet initialized - Name: {self.wallet_name}, Coldkey: {w.coldkeypub.ss58_address}, Hotkey: {w.hotkey.ss58_address}")
             except Exception:
                 # Keys are missing — create new wallet
-                logger.info(f"Creating new wallet with name: {self.wallet_name}")
+                logger.info(f"Creating new wallet - Name: {self.wallet_name}")
                 w.create()
                 self.hotkey = w.hotkey.ss58_address
-                logger.info(f"Wallet created: coldkey={w.coldkeypub.ss58_address}, hotkey={w.hotkey.ss58_address}")
+                logger.info(f"New wallet created - Coldkey: {w.coldkeypub.ss58_address}, Hotkey: {w.hotkey.ss58_address}")
 
             return w
 
         except Exception as e:
-            logger.error(f"Error initializing wallet: {str(e)}")
+            logger.error(f"Wallet initialization failed - Error: {str(e)}")
             raise
             
     def _initialize_subtensor(self) -> bt.subtensor:
@@ -156,19 +155,18 @@ class BittensorWallet:
         try:
             # Initialize subtensor with testnet
             subtensor = bt.subtensor(network="test")
-            logger.info("Connected to Bittensor testnet")
+            logger.info("Connected to Bittensor testnet successfully")
             return subtensor
         except Exception as e:
-            logger.error(f"Error connecting to subtensor: {str(e)}")
+            logger.error(f"Failed to connect to Bittensor testnet - Error: {str(e)}")
             raise
 
     async def _fund_if_needed(self):
         """Fund the wallet from the faucet if balance is low."""
-        
         try:
             current_balance = await self.get_tao_balance()
             if current_balance is not None and current_balance < 1.0:
-                logger.info(f"Wallet balance is low ({current_balance} TAO). Attempting to fund from faucet...")
+                logger.info(f"Wallet balance low ({current_balance:.4f} TAO) - Attempting faucet funding")
 
                 faucet_wallet = Wallet(
                     name=self.faucet_wallet_name,
@@ -181,7 +179,7 @@ class BittensorWallet:
 
                 faucet_balance = self.subtensor.get_balance(faucet_wallet.coldkeypub.ss58_address)
                 if faucet_balance.tao < self.max_faucet_transfer:
-                    logger.warning("Faucet wallet has insufficient funds.")
+                    logger.warning(f"Faucet wallet has insufficient funds ({faucet_balance.tao:.4f} TAO)")
                     return
 
                 result = self.subtensor.transfer(
@@ -191,13 +189,13 @@ class BittensorWallet:
                     wait_for_inclusion=True
                 )
 
-                logger.info(f"Funded wallet with {self.max_faucet_transfer} TAO: {result}")
+                logger.info(f"Faucet funding successful - Amount: {self.max_faucet_transfer:.4f} TAO")
             else:
-                logger.info(f"Wallet already has sufficient balance: {current_balance} TAO")
+                logger.info(f"Wallet has sufficient balance: {current_balance:.4f} TAO")
 
         except Exception as e:
-            logger.error(f"Error funding wallet: {str(e)}")
-
+            logger.error(f"Faucet funding failed - Error: {str(e)}")
+            raise
 
     def get_wallet_info(self) -> dict:
         """Get current balance of wallet."""
@@ -215,15 +213,15 @@ class BittensorWallet:
                 "hotkey": self.hotkey,
                 "tao_balance": 0.0
             }
-        
+
     async def add_stake(self, netuid: int, hotkey: str, amount: float) -> Dict[str, Any]:
         """Add stake to a hotkey."""
-        amount_balance = Balance.from_tao(amount).set_unit(netuid)
-        
-        await self._fund_if_needed()
-
-        logger.info(f"Amount converted to Balance: {amount_balance.tao}")
         try:
+            amount_balance = Balance.from_tao(amount).set_unit(netuid)
+            logger.info(f"Preparing stake - Netuid: {netuid}, Hotkey: {hotkey}, Amount: {amount_balance.tao:.4f} TAO")
+            
+            await self._fund_if_needed()
+
             result = await self.subtensor.add_stake(
                 wallet=self.wallet,
                 netuid=netuid,
@@ -232,20 +230,22 @@ class BittensorWallet:
                 allow_partial_stake=True,
                 safe_staking=True
             )
+            
+            logger.info(f"Stake successful - Netuid: {netuid}, Hotkey: {hotkey}, Amount: {amount_balance.tao:.4f} TAO")
             return {
                 "success": True,
                 "result": result
             }
         except Exception as e:
-            logger.error(f"Error adding stake: {str(e)}")
+            logger.error(f"Stake failed - Netuid: {netuid}, Hotkey: {hotkey}, Error: {str(e)}")
             return {"success": False, "error": str(e)}
             
     async def unstake(self, netuid: int, hotkey: str, amount: float) -> Dict[str, Any]:
         """Remove stake from a hotkey."""
-        amount_balance = Balance.from_tao(amount).set_unit(netuid)
-
-        logger.info(f"Amount converted to Balance: {amount_balance}")
         try:
+            amount_balance = Balance.from_tao(amount).set_unit(netuid)
+            logger.info(f"Preparing unstake - Netuid: {netuid}, Hotkey: {hotkey}, Amount: {amount_balance.tao:.4f} TAO")
+
             result = await self.subtensor.unstake(
                 wallet=self.wallet,
                 netuid=netuid,
@@ -254,12 +254,14 @@ class BittensorWallet:
                 allow_partial_stake=True,
                 safe_staking=True
             )
+            
+            logger.info(f"Unstake successful - Netuid: {netuid}, Hotkey: {hotkey}, Amount: {amount_balance.tao:.4f} TAO")
             return {
                 "success": True,
                 "result": result
             }
         except Exception as e:
-            logger.error(f"Error unstaking: {str(e)}")
+            logger.error(f"Unstake failed - Netuid: {netuid}, Hotkey: {hotkey}, Error: {str(e)}")
             return {"success": False, "error": str(e)}
             
     async def get_tao_balance(self) -> Optional[float]:
@@ -267,10 +269,11 @@ class BittensorWallet:
         try:
             balance = self.subtensor.get_balance(self.wallet.coldkeypub.ss58_address)
             if balance is not None:
+                logger.info(f"Current wallet balance: {balance.tao:.4f} TAO")
                 return balance.tao
             else:
-                logger.warning("No balance found.")
+                logger.warning("No balance found for wallet")
                 return 0.0
         except Exception as e:
-            logger.error(f"Error getting balance: {str(e)}")
+            logger.error(f"Failed to get wallet balance - Error: {str(e)}")
             return None
