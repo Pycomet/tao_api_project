@@ -10,14 +10,25 @@ services:
     depends_on:
       - redis
       - db
+      - worker
     ports:
       - "8000:8000"
     volumes:
       - .:/app
+      - ~/.bittensor/wallets:/root/.bittensor/wallets
     environment:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - REDIS_DB=0
+      - REDIS_URL=redis://redis:6379/0
+      - DATABASE_URL=postgresql+asyncpg://tao_user:tao_pass@db:5432/tao_db
+      - DATURA_API_KEY=${DATURA_API_KEY}
+      - CHUTES_API_KEY=${CHUTES_API_KEY}
+      - BITTENSOR_WALLET_NAME=${BITTENSOR_WALLET_NAME:-default}
+      - BITTENSOR_WALLET_HOTKEY=${BITTENSOR_WALLET_HOTKEY:-default}
+      - BITTENSOR_MNEMONIC=${BITTENSOR_MNEMONIC}
+      - DEFAULT_HOTKEY=${DEFAULT_HOTKEY}
+      - DEFAULT_NETUID=${DEFAULT_NETUID:-18}
 
   worker:
     build: .
@@ -30,10 +41,18 @@ services:
       - db
     volumes:
       - .:/app
+      - ~/.bittensor/wallets:/root/.bittensor/wallets
     environment:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - REDIS_DB=0
+      - REDIS_URL=redis://redis:6379/0
+      - DATABASE_URL=postgresql+asyncpg://tao_user:tao_pass@db:5432/tao_db
+      - DATURA_API_KEY=${DATURA_API_KEY}
+      - CHUTES_API_KEY=${CHUTES_API_KEY}
+      - BITTENSOR_WALLET_NAME=${BITTENSOR_WALLET_NAME:-default}
+      - BITTENSOR_WALLET_HOTKEY=${BITTENSOR_WALLET_HOTKEY:-default}
+      - BITTENSOR_MNEMONIC=${BITTENSOR_MNEMONIC}
 
   scheduler:
     build: .
@@ -46,14 +65,21 @@ services:
       - db
       - worker
     volumes:
-      - .:/app
+      - ~/.bittensor/wallets:/root/.bittensor/wallets
     environment:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - REDIS_DB=0
+      - REDIS_URL=redis://redis:6379/0
+      - DATABASE_URL=postgresql+asyncpg://tao_user:tao_pass@db:5432/tao_db
+      - DATURA_API_KEY=${DATURA_API_KEY}
+      - CHUTES_API_KEY=${CHUTES_API_KEY}
+      - BITTENSOR_WALLET_NAME=${BITTENSOR_WALLET_NAME:-default}
+      - BITTENSOR_WALLET_HOTKEY=${BITTENSOR_WALLET_HOTKEY:-default}
+      - BITTENSOR_MNEMONIC=${BITTENSOR_MNEMONIC}
 
   redis:
-    image: redis:7
+    image: redis:7-alpine
     container_name: tao_redis
     ports:
       - "6379:6379"
@@ -61,7 +87,7 @@ services:
       - redis_data:/data
 
   db:
-    image: postgres:15
+    image: postgres:15-alpine
     container_name: postgres
     restart: always
     environment:

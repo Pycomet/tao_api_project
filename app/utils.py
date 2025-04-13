@@ -6,6 +6,28 @@ from fastapi import HTTPException, Security
 from typing import Optional
 from jose import jwt, JWTError # type: ignore
 from datetime import datetime, timedelta, timezone
+import json
+import os
+
+import subprocess
+import time
+
+
+# Usage
+# balance_info = get_tao_balance()
+# print(balance_info)
+
+
+# Load fake users database
+def load_fake_users_db():
+    try:
+        with open("fake_users_db.json", "r") as f:
+            return json.load(f)
+    except Exception as e:
+        logging.error(f"Error loading fake_users_db.json: {e}")
+        return {}
+
+fake_users_db = load_fake_users_db()
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
@@ -38,7 +60,9 @@ def get_password_hash(password: str) -> str:
 
 # Function to authenticate the user
 def authenticate_user(username: str, password: str) -> Optional[dict]:
-    user = fake_users_db.get(username)
+    # Reload the database in case it was updated
+    users_db = load_fake_users_db()
+    user = users_db.get(username)
     if not user:
         return None
     if not verify_password(password, user["hashed_password"]):
@@ -104,23 +128,3 @@ async def fetch_tao_dividends():
     except Exception as e:
         logger.error(f"Error in fetch_tao_dividends: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to fetch dividends: {str(e)}")
-
-
-
-
-fake_users_db = {
-    "codefred": {
-        "username": "codefred",
-        "full_name": "Alfred The Dev",
-        "email": "alfred@example.com",
-        "hashed_password": get_password_hash("secret123"),  # 👈 test password
-        "disabled": False,
-    },
-    "devqueen": {
-        "username": "devqueen",
-        "full_name": "Queen Coder",
-        "email": "queen@example.com",
-        "hashed_password": get_password_hash("codequeen"),
-        "disabled": False,
-    },
-}

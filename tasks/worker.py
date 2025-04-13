@@ -1,5 +1,6 @@
+from typing import Any, Dict
 from celery import Celery
-from app.clients import DaturaClient, LLMClient
+from app.clients import BittensorWallet, DaturaClient, LLMClient
 from app.config import (
     REDIS_HOST, REDIS_PORT, REDIS_DB, CACHE_TTL,
     get_dividend_cache_key, get_block_hash_cache_key, get_sentiment_cache_key,
@@ -19,6 +20,11 @@ from datetime import datetime
 
 # Configure logging
 logger = get_task_logger(__name__)
+
+# Initialize clients
+datura_client = DaturaClient()
+llm_client = LLMClient()
+wallet = BittensorWallet()
 
 # Initialize Celery
 celery_app = Celery('tasks.worker', broker=f'redis://{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}')
@@ -144,9 +150,7 @@ def update_dividends_cache(self):
             logger.error("Max retries exceeded for periodic update_dividends_cache task")
             raise
 
-# Initialize clients
-datura_client = DaturaClient()
-llm_client = LLMClient()
+
 
 @celery_app.task(bind=True, max_retries=3)
 async def analyze_sentiment(self, netuid: int) -> dict[str, any]:
@@ -166,9 +170,12 @@ async def analyze_sentiment(self, netuid: int) -> dict[str, any]:
             - cached (bool): Whether the result was retrieved from cache
     """
     try:
+        logger.info(f"Starting sentiment analysis for netuid {netuid}")
+        
         # Search for tweets
         tweets_result = await datura_client.search_tweets(str(netuid))
         if not tweets_result:
+            logger.warning(f"No tweets found for netuid {netuid}")
             return {
                 "success": False,
                 "error": "No tweets found",
@@ -179,12 +186,15 @@ async def analyze_sentiment(self, netuid: int) -> dict[str, any]:
         # Extract tweet texts
         tweets = [result.get("text") for result in tweets_result if "text" in result.keys()]
         if not tweets:
+            logger.warning(f"No valid tweets found for netuid {netuid}")
             return {
                 "success": False,
                 "error": "No valid tweets found",
                 "sentiment_score": "",
                 "tweets_analyzed": 0
             }
+        
+        logger.info(f"Found {len(tweets)} tweets for analysis")
         
         # Combine tweets for analysis
         combined_tweets = "\n".join(tweets) 
@@ -200,35 +210,37 @@ async def analyze_sentiment(self, netuid: int) -> dict[str, any]:
         
         # Get sentiment analysis
         sentiment_result = await llm_client.query_chute_llm(SENTIMENT_PROMPT)
-
-        cache_key = get_sentiment_cache_key(netuid)
+        sentiment_score = float(sentiment_result)
         
-        try:
-            result = {
-                "success": True,
-                "sentiment_score": sentiment_result,
-                "tweets_analyzed": len(tweets),
-                "error": None,
-                "cached": False
-            }
-            # Cache the successful result
-            redis_client.set(cache_key, json.dumps(result), ex=CACHE_TTL)
-            return result
-        except (ValueError, TypeError):
-            result = {
-                "success": False,
-                "error": "Invalid sentiment score format",
-                "sentiment_score": "",
-                "tweets_analyzed": len(tweets)
-            }
-            # Cache the error result
-            redis_client.set(cache_key, json.dumps(result), ex=CACHE_TTL)
-            return result
+        logger.info(f"Sentiment analysis complete - Score: {sentiment_score:.2f}")
+        
+        if sentiment_score:
+            logger.info(f"Executing trade based on sentiment score: {sentiment_score:.2f}")
+            await execute_sentiment_trade(
+                netuid=netuid,
+                hotkey=wallet.hotkey,
+                sentiment_score=sentiment_score,
+            )
+        
+        result = {
+            "success": True,
+            "sentiment_score": sentiment_result,
+            "tweets_analyzed": len(tweets),
+            "error": None,
+            "cached": False
+        }
+        
+        # Cache the result
+        cache_key = get_sentiment_cache_key(netuid)
+        redis_client.set(cache_key, json.dumps(result), ex=CACHE_TTL)
+        logger.info(f"Cached sentiment result for netuid {netuid}")
+        
+        return result
         
     except Exception as e:
-        logger.error(f"Error in analyze_sentiment: {str(e)}")
+        logger.error(f"Sentiment analysis failed for netuid {netuid} - Error: {str(e)}")
         try:
-            self.retry(exc=e, countdown=60)  # Retry after 1 minute
+            self.retry(exc=e, countdown=60)
         except MaxRetriesExceededError:
             result = {
                 "success": False,
@@ -236,9 +248,79 @@ async def analyze_sentiment(self, netuid: int) -> dict[str, any]:
                 "sentiment_score": "",
                 "tweets_analyzed": 0
             }
-            # Cache the error result
+            cache_key = get_sentiment_cache_key(netuid)
             redis_client.set(cache_key, json.dumps(result), ex=CACHE_TTL)
             return result
+
+
+@celery_app.task(bind=True, max_retries=3)
+async def execute_sentiment_trade(netuid: int, hotkey: str, sentiment_score: float) -> Dict[str, Any]:
+    """
+    Execute a trade based on the sentiment score.
+    Stakes or unstakes TAO proportional to the sentiment score (-100 to +100).
+    
+    Args:
+        netuid (int): The netuid to trade for
+        hotkey (str): The hotkey to trade with
+        sentiment_score (float): The sentiment score to base the trade on (-100 to +100)
+        
+    Returns:
+        Dict[str, Any]: A dictionary containing:
+            - success (bool): Whether the trade was successful
+            - action (str): The action taken (stake/unstake)
+            - amount (float): The amount traded
+            - error (str): Error message if any
+    """
+    try:
+        # Base amount to stake/unstake (1 TAO)
+        BASE_AMOUNT = 0.01
+        # Calculate final amount
+        assert sentiment_score is not None, "Sentiment score is None!"
+        amount = BASE_AMOUNT * abs(sentiment_score)
+        assert amount is not None, "Amount calculation failed!"
+        
+        logger.info(f"Preparing trade - Netuid: {netuid}, Hotkey: {hotkey}, Sentiment: {sentiment_score:.2f}, Amount: {amount:.4f} TAO")
+        
+        if sentiment_score > 0:
+            # Stake TAO
+            logger.info(f"Staking {amount:.4f} TAO to netuid {netuid} for hotkey {hotkey}")
+            result = await wallet.add_stake(netuid=netuid, hotkey=hotkey, amount=float(amount))
+            action = "stake"
+        elif sentiment_score < 0:
+            # Unstake TAO
+            logger.info(f"Unstaking {amount:.4f} TAO from netuid {netuid} for hotkey {hotkey}")
+            result = await wallet.unstake(netuid=netuid, hotkey=hotkey, amount=float(amount))
+            action = "unstake"
+        else:
+            logger.info("No action needed - sentiment score is neutral")
+            return {
+                "success": True,
+                "action": "no_action",
+                "amount": 0.0,
+                "error": None
+            }
+            
+        if result.get("success", False):
+            logger.info(f"Trade successful - Action: {action}, Amount: {amount:.4f} TAO")
+        else:
+            logger.error(f"Trade failed - Action: {action}, Error: {result.get('error', 'Unknown error')}")
+        
+        return {
+            "success": result.get("success", False),
+            "action": action,
+            "amount": amount,
+            "error": result.get("error", "")
+        }
+        
+    except Exception as e:
+        logger.error(f"Trade execution failed - Netuid: {netuid}, Hotkey: {hotkey}, Error: {str(e)}")
+        return {
+            "success": False,
+            "action": "error",
+            "amount": 0.0,
+            "error": str(e)
+        }
+
 
 if __name__ == '__main__':
     celery_app.start()
